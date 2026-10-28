@@ -5,12 +5,21 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
 
 # Virtual environments
 .venv
 
-*.toml
-.python-version
+# Secrets and local environment
+.env
 src/.env
-uv.lock
-pyrightconfig.json
+
+# Runtime data
+logs/
+exports/
+data/
+*.xlsx
+discovery_progress.json
+discovery_progress.json.lock
+*.tmp
+*.temp

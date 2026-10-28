@@ -3,6 +3,7 @@ Playwright Stealth & Performance Hardening Module
 """
 
 from playwright.sync_api import Page, BrowserContext, Route
+from config import Config
 from core.logger import app_logger
 
 try:
@@ -14,17 +15,19 @@ except ImportError:
 STEALTH_CHROMIUM_ARGS = [
     "--disable-blink-features=AutomationControlled",
     "--disable-features=IsolateOrigins,site-per-process",
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
     "--disable-infobars",
     "--window-position=0,0",
-    "--ignore-certificate-errors",
     "--disable-dev-shm-usage",
     "--no-first-run",
-    "--no-zygote",
     "--hide-scrollbars",
-    "--mute-audio"
+    "--mute-audio",
 ]
+
+# Disabling the Chromium sandbox is unsafe when rendering untrusted pages. It is
+# opt-in only for constrained container environments where no other option works.
+if Config.PLAYWRIGHT_NO_SANDBOX:
+    app_logger.warning("Chromium sandbox is disabled via PLAYWRIGHT_NO_SANDBOX.")
+    STEALTH_CHROMIUM_ARGS.extend(["--no-sandbox", "--disable-setuid-sandbox"])
 
 EVASION_SCRIPT = """
 (() => {

@@ -1,20 +1,44 @@
 [project]
-name = "code"
+name = "findrivo"
 version = "0.1.0"
-description = "Add your description here"
+description = "FindRivo autonomous B2B lead discovery, website auditing, and outreach hook engine"
 readme = "README.md"
 authors = [
     { name = "Trooff", email = "trooffcodes@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "ddgs>=9.16.0",
+    "flask>=3.1.0",
+    "google-genai>=2.0.0",
+    "groq>=1.0.0",
+    "pillow>=13.0.0",
+    "playwright>=1.64.0",
+    "playwright-stealth>=2.0.3",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "urllib3>=2.0.0",
+]
 
 [project.scripts]
-code = "code:main"
+findrivo = "app:main"
 
 [build-system]
-requires = ["uv_build>=0.13.1,<0.14.0"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+sources = ["src"]
+include = [
+    "src/app.py",
+    "src/config.py",
+    "src/wsgi.py",
+    "src/core/**",
+    "src/methods/**",
+    "src/prompts/**",
+]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

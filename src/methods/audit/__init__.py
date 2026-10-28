@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
@@ -8,7 +8,8 @@ from core.logger import app_logger, track_performance
 from .network import (
     normalize_target,
     check_ssl,
-    fetch_page,
+    fetch_page,  # noqa: F401  (re-exported for compatibility)
+    fetch_page_samples,
     check_links_concurrently,
     is_internal_link,
     _MAX_SAMPLE_LINKS,
@@ -18,6 +19,62 @@ from .network import (
 from .css_auditor import audit_css
 from .ui_auditor import audit_ui_heuristics, build_design_skeleton
 from .critic import qualify_redesign
+
+# Page-weight sampling bounds: HEAD-check at most this many images, each with
+# this timeout. Keeps the added audit cost to well under a second in practice.
+_PAGE_WEIGHT_MAX_IMAGES = 8
+_PAGE_WEIGHT_TIMEOUT = 3.0
+
+
+def _measure_page_weight(html: str, soup: Any, session: Any, base_url: str) -> Dict[str, Any]:
+    """Bounded page-weight estimate: HTML size + HEAD checks on a few images.
+
+    Deliberately lightweight: no rendering, no full asset crawl — just the
+    homepage HTML size and Content-Length of up to 8 sampled images fetched
+    concurrently with short timeouts.
+    """
+    import concurrent.futures
+
+    html_bytes = len(html.encode("utf-8", "ignore"))
+
+    img_urls: List[str] = []
+    for img in soup.find_all("img", src=True):
+        src = str(img.get("src") or "").strip()
+        if not src or src.startswith(("data:", "javascript:")):
+            continue
+        resolved = urljoin(base_url, src)
+        if resolved.startswith("http") and resolved not in img_urls:
+            img_urls.append(resolved)
+        if len(img_urls) >= _PAGE_WEIGHT_MAX_IMAGES:
+            break
+
+    def _head_size(u: str) -> int:
+        try:
+            resp = session.head(u, timeout=_PAGE_WEIGHT_TIMEOUT, allow_redirects=True)
+            cl = resp.headers.get("Content-Length", "")
+            return int(cl) if cl.isdigit() else 0
+        except Exception:
+            return 0
+
+    image_bytes = 0
+    measured = 0
+    if img_urls:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            sizes = list(pool.map(_head_size, img_urls))
+        image_bytes = sum(sizes)
+        measured = sum(1 for s in sizes if s > 0)
+
+    total_bytes = html_bytes + image_bytes
+    return {
+        "html_bytes": html_bytes,
+        "image_count": len(soup.find_all("img")),
+        "sampled_images": len(img_urls),
+        "measured_images": measured,
+        "image_bytes": image_bytes,
+        "total_bytes": total_bytes,
+        "total_mb": round(total_bytes / (1024 * 1024), 2),
+        "method": "html_size_plus_head_sampled_images",
+    }
 
 
 @track_performance("audit_domain_vitals")
@@ -30,6 +87,7 @@ def audit_website(url: str, enable_llm_critic: bool = True) -> Dict[str, Any]:
         "url": url,
         "is_live": False,
         "load_time_seconds": 0.0,
+        "response_time": {},
         "has_ssl": False,
         "ssl_details": {},
         "is_mobile_viewport": False,
@@ -37,6 +95,7 @@ def audit_website(url: str, enable_llm_critic: bool = True) -> Dict[str, Any]:
         "broken_links_details": [],
         "css_audit": {},
         "ui_heuristics": {},
+        "page_weight": {},
         "redesign_qualification": {},
         "issues_found": [],
     }
@@ -55,13 +114,22 @@ def audit_website(url: str, enable_llm_critic: bool = True) -> Dict[str, Any]:
             f"SSL certificate expires soon ({ssl_info['days_remaining']} days remaining)"
         )
 
-    # 2. HTTP Request
+    # 2. HTTP Request(s) — up to two GETs to damp single-sample noise.
     session = requests.Session()
     session.headers.update(_REQUEST_HEADERS)
 
     try:
-        html, load_time, status_code, err = fetch_page(url, session)
+        html, load_time, status_code, err, response_meta = fetch_page_samples(url, session)
         audit_result["load_time_seconds"] = load_time
+        audit_result["response_time"] = {
+            "seconds": load_time,
+            "samples": response_meta.get("samples", 0),
+            "basis": response_meta.get("basis", "http_get_duration"),
+            "inconclusive": response_meta.get("inconclusive", True),
+            "reliable": response_meta.get("reliable", False),
+            "method": "client-side HTTP GET duration (DNS, TLS and network included; "
+            "not browser page-load time)",
+        }
 
         if err or status_code != 200 or not html:
             audit_result["issues_found"].append(err or f"Non-200 HTTP status code: {status_code}")
@@ -69,7 +137,14 @@ def audit_website(url: str, enable_llm_critic: bool = True) -> Dict[str, Any]:
 
         audit_result["is_live"] = True
         if load_time > 3.0:
-            audit_result["issues_found"].append(f"Slow response time: {load_time}s")
+            if response_meta.get("reliable"):
+                audit_result["issues_found"].append(
+                    f"Slow median response time across {response_meta['samples']} samples: {load_time}s"
+                )
+            else:
+                audit_result["issues_found"].append(
+                    f"Response time was slow in a single sample ({load_time}s); inconclusive"
+                )
 
         # 3. DOM & Viewport
         soup = BeautifulSoup(html, "html.parser")
@@ -81,6 +156,12 @@ def audit_website(url: str, enable_llm_critic: bool = True) -> Dict[str, Any]:
             audit_result["issues_found"].append(
                 "Not mobile responsive (Missing width=device-width in viewport meta)"
             )
+
+        # 3b. Lightweight page-weight sampling (HTML size + a few image HEADs).
+        try:
+            audit_result["page_weight"] = _measure_page_weight(html, soup, session, url)
+        except Exception as pw_err:
+            app_logger.debug("Page-weight sampling failed for %s: %s", url, pw_err)
 
         # 4. Actual CSS Audit (Rules, media queries, flexbox/grid, fixed widths)
         css_data = audit_css(soup=soup, base_url=url, session=session)
@@ -113,8 +194,11 @@ def audit_website(url: str, enable_llm_critic: bool = True) -> Dict[str, Any]:
                 f"{broken_count} of {len(candidate_links)} sampled internal links returned errors"
             )
 
-        # 7. LLM Redesign Qualification (~150 tokens)
-        if enable_llm_critic:
+        # 7. LLM Redesign Qualification (~150 tokens).
+        # Skipped for dead sites: a critic cannot meaningfully judge a website
+        # that did not respond, and the analysis call costs real latency every
+        # lead despite adding nothing (observed defects already cover the audit).
+        if enable_llm_critic and audit_result["is_live"]:
             skeleton = build_design_skeleton(
                 soup=soup,
                 css_data=css_data,

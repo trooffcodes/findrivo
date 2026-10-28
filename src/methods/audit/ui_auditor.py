@@ -1,6 +1,6 @@
 
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import timezone, timedelta
 from typing import Any, Dict
 
 from bs4 import BeautifulSoup

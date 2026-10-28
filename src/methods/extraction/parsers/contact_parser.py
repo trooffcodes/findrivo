@@ -6,7 +6,7 @@ and Cloudflare encrypted emails using regex, DOM heuristics, and pattern decoder
 
 import html
 import re
-from typing import List, Set, Tuple
+from typing import List, Set
 from bs4 import BeautifulSoup
 
 from ..utils import (
@@ -147,7 +147,6 @@ class ContactParser:
 
         for form in soup.find_all("form"):
             action = form.get("action", "")
-            method = form.get("method", "post").lower()
             text_desc = form.get_text(" ").lower()
 
             # Identify if form has email/message fields

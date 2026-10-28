@@ -11,6 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from core.logger import app_logger, perf_logger, track_performance
+from core.net_guard import UnsafeURLError, safe_request
 
 USER_AGENTS = [
     # Chrome on macOS
@@ -66,12 +67,12 @@ class LightweightFetcher:
             Tuple[Optional[str], int, str]: (html_content, status_code, final_url)
         """
         try:
-            response = self.session.get(
+            response = safe_request(
+                self.session,
+                "GET",
                 url,
                 headers=self._get_headers(),
                 timeout=self.timeout,
-                allow_redirects=True,
-                verify=True,
             )
             # Inspect encoding and fall back gracefully
             if response.encoding is None or response.encoding == "ISO-8859-1":
@@ -85,25 +86,13 @@ class LightweightFetcher:
             )
             if response.status_code < 400:
                 return response.text, response.status_code, response.url
-            
+
             app_logger.warning("HTTP %d for URL: %s", response.status_code, url)
             return None, response.status_code, response.url
 
-        except requests.exceptions.SSLError:
-            app_logger.warning("SSL Error on %s. Retrying without SSL verify...", url)
-            try:
-                response = self.session.get(
-                    url,
-                    headers=self._get_headers(),
-                    timeout=self.timeout,
-                    allow_redirects=True,
-                    verify=False,
-                )
-                return response.text, response.status_code, response.url
-            except Exception as e:
-                app_logger.error("Failed non-SSL fetch for %s: %s", url, e)
-                return None, 0, url
-
+        except UnsafeURLError as e:
+            app_logger.warning("Blocked unsafe URL %s: %s", url, e)
+            return None, 0, url
         except requests.exceptions.RequestException as e:
             app_logger.warning("Network failure requesting %s: %s", url, e)
             return None, 0, url

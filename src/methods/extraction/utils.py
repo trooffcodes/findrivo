@@ -5,7 +5,7 @@ String sanitation, regex validation, and Cloudflare email deobfuscation.
 
 import html
 import re
-from typing import List, Optional, Set
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 # File extensions commonly found in href or img src that false-match email patterns

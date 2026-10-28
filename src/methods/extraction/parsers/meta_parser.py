@@ -4,9 +4,8 @@ Extracts JSON-LD Schema.org graphs, OpenGraph tags, and HTML headers.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 from bs4 import BeautifulSoup
-from core.logger import app_logger
 
 
 class MetaParser:

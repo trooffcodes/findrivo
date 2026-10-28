@@ -37,6 +37,19 @@ DISCARD_PATTERNS = [
 class SocialParser:
     """Extracts social media links from HTML and enriches them via lightweight inspection."""
 
+    @staticmethod
+    def _netloc_matches(netloc: str, domain: str) -> bool:
+        """Label-boundary hostname match: 'x.com' must not hit 'recallmax.com'."""
+        host = (netloc or "").lower().strip(".")
+        # Drop any leading port.
+        host = host.split(":", 1)[0]
+        # Strip a single leading "www." for both sides.
+        if host.startswith("www."):
+            host = host[4:]
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return host == domain or host.endswith("." + domain)
+
     @classmethod
     def discover_socials(cls, soup: BeautifulSoup, raw_same_as: Optional[List[str]] = None) -> List[SocialProfile]:
         urls_to_evaluate: Set[str] = set()
@@ -48,7 +61,7 @@ class SocialParser:
         for a in soup.find_all("a", href=True):
             href = a["href"].strip()
             for domain in SOCIAL_PLATFORMS:
-                if domain in href.lower():
+                if cls._netloc_matches(urlparse(href).netloc, domain):
                     urls_to_evaluate.add(href)
 
         profiles: List[SocialProfile] = []
@@ -78,7 +91,7 @@ class SocialParser:
                 return None
 
         for domain, platform_name in SOCIAL_PLATFORMS.items():
-            if domain in netloc:
+            if cls._netloc_matches(netloc, domain):
                 path_segments = [p for p in parsed.path.split("/") if p]
                 if not path_segments:
                     return None

@@ -7,9 +7,8 @@ Main engine orchestrating the crawling process:
 - Enriches discovered social profiles
 """
 
-import re
-from typing import List, Optional, Set
-from urllib.parse import urljoin, urlparse
+from typing import List, Set
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 from core.logger import app_logger, track_performance
@@ -90,7 +89,8 @@ class BusinessExtractor:
         # 3. Discover high-priority internal links
         links_to_crawl = self._discover_priority_links(hp_soup, final_url, visited_urls)
 
-        # 4. Crawl priority pages within budget
+        # 4. Crawl priority pages within budget; stop early once the core
+        # contact material is complete so we never fetch pages we don't need.
         for url in links_to_crawl[: self.max_pages - 1]:
             app_logger.info("Crawling secondary priority page: %s", url)
             sub_html, sub_status, sub_url = self.fetcher.fetch(url)
@@ -116,6 +116,13 @@ class BusinessExtractor:
             socials_acc.extend(
                 SocialParser.discover_socials(sub_soup, sub_meta.get("schema_same_as", []))
             )
+
+            if emails_acc and phones_acc and forms_acc:
+                app_logger.info(
+                    "Stopping crawl early: core contact data complete after %d page(s)",
+                    len(crawled_pages),
+                )
+                break
 
         # 5. Deduplicate and enrich Socials
         unique_socials: dict = {}

@@ -71,8 +71,10 @@ class AdaptivePacingEngine:
             self.latency_history.pop(0)
 
         avg_latency = sum(self.latency_history) / max(len(self.latency_history), 1)
+        # The multiplier is capped: without a cap, one slow region compounds
+        # into ever-longer delays that can look like a pipeline stall.
         if avg_latency > 4.0:
-            self.current_multiplier = min(2.5, self.current_multiplier + 0.3)
+            self.current_multiplier = min(1.5, self.current_multiplier + 0.2)
             app_logger.warning("High response latency (%.2fs). Multiplier at %.2fx", avg_latency, self.current_multiplier)
         elif avg_latency < 2.0 and self.current_multiplier > 1.0:
             self.current_multiplier = max(1.0, self.current_multiplier - 0.1)

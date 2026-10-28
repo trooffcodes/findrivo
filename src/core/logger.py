@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 
 from config import Config
 
-_LOG_DIR = "logs"
+_LOG_DIR = str(Config.LOG_DIR)
 _MAX_LOG_SIZE = 5 * 1024 * 1024
 _BACKUP_COUNT = 3
 _IST = timezone(timedelta(hours=5, minutes=30))

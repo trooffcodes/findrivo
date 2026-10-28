@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from core.logger import app_logger, track_performance
+from core.net_guard import safe_request
 
 _MAX_STYLESHEET_FETCH = 2
 _MAX_CSS_BYTES = 120_000
@@ -61,7 +62,9 @@ def audit_css(
         resolved_url = urljoin(base_url, href)
 
         try:
-            with session.get(
+            with safe_request(
+                session,
+                "GET",
                 resolved_url,
                 timeout=2.5,
                 stream=True,
